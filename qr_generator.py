@@ -15,7 +15,11 @@ def generate_qr_code(row):
     section = row['Section']
 
     # get json data
-    json_data = json.dumps(row.to_dict())
+    json_data = json.dumps({
+        "Student ID": student_id,
+        "Student Name": student_name,
+        "Year": year,
+        "Section": section})
     print(json_data)
 
     # check if the qr code already exists
@@ -32,6 +36,9 @@ def generate_qr_code(row):
     img.save(f'qr/{year}/{student_id}_{year}_{section}.png')
 
 def generate_batch_qr_code(df):
+    # Change the dtype of the Student ID to a string
+    df["Student ID"] = df["Student ID"].astype('str')
+
     # Generate QR Code for each row
     for index, row in df.iterrows():
         generate_qr_code(row)
