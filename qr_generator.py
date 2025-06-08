@@ -20,6 +20,7 @@ def generate_qr_code(row):
 
     # check if the qr code already exists
     if os.path.exists(f'qr/{year}/{student_id}_{year}_{section}.png'):
+        print(f'QR Code already exists for {student_id}_{year}_{section}.')
         return
     else:
         os.makedirs(f'qr/{year}', exist_ok=True)
@@ -37,6 +38,13 @@ def generate_batch_qr_code(df):
 
 
     
+def delete_qr_code(year, student_id, section):
+    # check if the qr code exists
+    if os.path.exists(f'qr/{year}/{student_id}_{year}_{section}.png'):
+        os.remove(f'qr/{year}/{student_id}_{year}_{section}.png')
+        print(f'QR Code deleted for {student_id}_{year}_{section}.')
+    else:
+        print(f'QR Code not found for {student_id}_{year}_{section}.')
 
 
 
