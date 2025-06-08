@@ -1,18 +1,10 @@
 # Generate QR Code for given excel file
-import pandas as pd
 import qrcode
 import os
 import json
 
-# Create a directory for the QR codes
-os.makedirs('qr', exist_ok=True)
 
-# Read the excel file
-df = pd.read_excel('excel/data.xlsx')
-
-
-# Generate QR Code for each row
-for index, row in df.iterrows():
+def generate_qr_code(row):
     # get student id
     student_id = row['Student ID']
     # get student name
@@ -22,15 +14,30 @@ for index, row in df.iterrows():
     # get section
     section = row['Section']
 
-    # check if the qr code already exists
-    if os.path.exists(f'qr/{student_id}_{year}_{section}.png'):
-        continue
+    # get json data
+    json_data = json.dumps(row.to_dict())
+    print(json_data)
 
+    # check if the qr code already exists
+    if os.path.exists(f'qr/{year}/{student_id}_{year}_{section}.png'):
+        return
+    else:
+        os.makedirs(f'qr/{year}', exist_ok=True)
+    
     qr = qrcode.QRCode(version=30, box_size=10, border=4)
-    qr.add_data(json.dumps(row.to_dict()))
+    qr.add_data(json_data)
     qr.make(fit=True)
     img = qr.make_image(fill='black', back_color='white')
-    img.save(f'qr/{student_id}_{year}_{section}.png')
+    img.save(f'qr/{year}/{student_id}_{year}_{section}.png')
+
+def generate_batch_qr_code(df):
+    # Generate QR Code for each row
+    for index, row in df.iterrows():
+        generate_qr_code(row)
+
+
+    
+
 
 
 
