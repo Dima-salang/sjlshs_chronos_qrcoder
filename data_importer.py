@@ -1,13 +1,30 @@
 import pandas as pd
 import sqlite3
-from models import StudentList
+import os
+from datetime import datetime
+from google.cloud import firestore
+
+class ImporterBuilder:
+    """ Importer builder class """
+
+    def __init__(self, file):
+        self.file = file
+
+    def build(self):
+        if not os.path.exists(self.file):
+            raise ValueError("File does not exist.")
+        # return the appropriate importer
+        if self.file.endswith('.xlsx') or self.file.endswith('.xls'):
+            return ExcelDataImporter(self.file)
+        else:
+            raise ValueError("Unsupported file format.")
 
 class DataImporter:
     """ Abstract importer class for importing data from various repositories such as Firestore """
     def __init__(self):
         pass
     
-    def import_data(self):
+    def import_data(self, start_date: datetime, end_date: datetime, section: str | None = None):
         raise NotImplementedError
 
 
@@ -28,8 +45,18 @@ class FirestoreDataImporter(DataImporter):
             raise ValueError("A valid Firestore database client is required.")
         self.db = db_client
     
-    def import_data(self):
-        pass
+    def import_data(self, start_date: datetime, end_date: datetime, section: str | None = None):
+        """Gets all student attendance records from Firestore for the given date range."""
+        try:
+            query = self.db.collection('attendance').where('timestamp', '>=', start_date).where('timestamp', '<=', end_date)
+
+            if section:
+                query = query.where('studentSection', '==', section)
+            
+            return query.get()
+        except Exception as e:
+            print(f"Error getting student records: {e}")
+            raise
 
     
 
@@ -54,7 +81,7 @@ class ExcelDataImporter(DataImporter):
             raise ValueError("An Excel file path is required.")
         self.excel_path = excel_path
     
-    def import_data(self):
+    def import_data(self, start_date: datetime, end_date: datetime, section: str | None = None):
         pass
 
 
