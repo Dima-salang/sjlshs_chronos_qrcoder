@@ -63,23 +63,23 @@ class QRCodeCrypto:
         Returns:
             Base64-encoded string containing the encrypted data and nonce
         """
-        # Convert data to JSON string
-        json_data = json.dumps(data, ensure_ascii=False).encode('utf-8')
+        # Convert data to string
+        data = str(data).encode('utf-8')
         
         # Generate a random nonce
         nonce = get_random_bytes(12)  # 96 bits for GCM
         
         # Create cipher and encrypt
         cipher = AES.new(self.key, AES.MODE_GCM, nonce=nonce)
-        ciphertext, tag = cipher.encrypt_and_digest(json_data)
+        ciphertext, tag = cipher.encrypt_and_digest(data)
         
         # Combine nonce, tag, and ciphertext
         encrypted_data = nonce + tag + ciphertext
         
         # Return as base64 string for easy QR code encoding
-        return b64encode(encrypted_data).decode('utf-8')
+        return encrypted_data
     
-    def decrypt_data(self, encrypted_data_str: str) -> Dict[str, Any]:
+    def decrypt_data(self, encrypted_data: bytes) -> str:
         """Decrypt the data from an encrypted string.
         
         Args:
@@ -92,9 +92,6 @@ class QRCodeCrypto:
             ValueError: If decryption or verification fails
         """
         try:
-            # Decode the base64 string
-            encrypted_data = b64decode(encrypted_data_str)
-            
             # Extract nonce (first 12 bytes), tag (next 16 bytes), and ciphertext (the rest)
             nonce = encrypted_data[:12]
             tag = encrypted_data[12:28]
@@ -102,10 +99,10 @@ class QRCodeCrypto:
             
             # Create cipher and decrypt
             cipher = AES.new(self.key, AES.MODE_GCM, nonce=nonce)
-            json_data = cipher.decrypt_and_verify(ciphertext, tag)
+            data = cipher.decrypt_and_verify(ciphertext, tag)
             
             # Convert back to dictionary
-            return json.loads(json_data.decode('utf-8'))
+            return data.decode('utf-8')
             
         except Exception as e:
             raise ValueError("Decryption failed. The QR code may be corrupted or the key is incorrect.") from e

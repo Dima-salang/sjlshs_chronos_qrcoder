@@ -11,7 +11,9 @@ from report_generator import ExcelReportGenerator
 # Import the Firestore database client
 # This line executes the initialization code in firebase_client.py
 from firebase_client import db
-from data_importer import ImporterBuilder
+from data_importer import ImporterBuilder, MasterListManager
+from key_manager import KeyManager
+from image_manager import DriveImageManager as ImageManager
 
 class QRCodeGeneratorApp:
     def __init__(self, root):
@@ -64,6 +66,11 @@ class QRCodeGeneratorApp:
         self.notebook.add(report_generator_tab, text='   Attendance Reports   ')
         self._create_report_generator_tab(report_generator_tab)
 
+        # -- Tab 4: Image Management --
+        image_tab = ttk.Frame(self.notebook, padding="20")
+        self.notebook.add(image_tab, text='   Image Management   ')
+        self._create_image_management_tab(image_tab)
+
     def _create_qr_generator_tab(self, tab):
         # Header
         header = ttk.Label(tab, text="Student QR Code Generator", style="Header.TLabel")
@@ -98,7 +105,14 @@ class QRCodeGeneratorApp:
         
         self.key_status_var = tk.StringVar(value="Key: Not Set")
         ttk.Label(encryption_frame, textvariable=self.key_status_var, foreground="gray").pack(side=tk.LEFT, padx=5)
-        ttk.Button(encryption_frame, text="Set Encryption Key", command=self.set_encryption_key).pack(side=tk.RIGHT, padx=5)
+        
+        # Key Management Buttons
+        btn_frame = ttk.Frame(encryption_frame)
+        btn_frame.pack(side=tk.RIGHT, padx=5)
+        
+        ttk.Button(btn_frame, text="Set Key", command=self.set_encryption_key).pack(side=tk.LEFT, padx=2)
+        ttk.Button(btn_frame, text="Upload Key", command=self.upload_key).pack(side=tk.LEFT, padx=2)
+        ttk.Button(btn_frame, text="Download Key", command=self.download_key).pack(side=tk.LEFT, padx=2)
         
         # Progress Frame
         progress_frame = ttk.LabelFrame(tab, text="Progress", padding=10)
@@ -166,20 +180,50 @@ The Excel file must contain columns with the following headers (order does not m
             side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
         ttk.Button(file_frame, text="Browse...", command=self._browse_master_list_file).pack(side=tk.RIGHT)
 
+        # Firebase Upload Option
+        self.upload_to_firebase_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(tab, text="Also upload to Firebase (Firestore)", variable=self.upload_to_firebase_var).pack(pady=5)
+
+
         # Import Button
         self.import_btn = ttk.Button(tab, text="Import Master List", command=self._start_master_list_import, style="Accent.TButton")
         self.import_btn.pack(pady=20)
 
         # Log Frame
         import_log_frame = ttk.LabelFrame(tab, text="Import Log", padding=10)
-        import_log_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        import_log_frame.pack(fill=tk.X, pady=10)
         
-        self.import_log_text = tk.Text(import_log_frame, height=10, wrap=tk.WORD, state='disabled')
+        self.import_log_text = tk.Text(import_log_frame, height=8, wrap=tk.WORD, state='disabled')
         self.import_log_text.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
         
         import_scrollbar = ttk.Scrollbar(self.import_log_text, command=self.import_log_text.yview)
         import_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.import_log_text.config(yscrollcommand=import_scrollbar.set)
+
+        # Database Management Section
+        db_mgmt_frame = ttk.LabelFrame(tab, text="Database Management", padding=10)
+        db_mgmt_frame.pack(fill=tk.X, pady=10)
+        
+        ttk.Label(db_mgmt_frame, text="Manage local and Firebase databases:", 
+                 font=('Helvetica', 9)).pack(anchor=tk.W, pady=(0, 10))
+        
+        # Buttons frame - use grid for better layout
+        buttons_frame = ttk.Frame(db_mgmt_frame)
+        buttons_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Button(buttons_frame, text="Upload Local DB to Firebase", 
+                  command=self._upload_local_to_firebase, width=25).grid(row=0, column=0, padx=5, pady=5, sticky='ew')
+        ttk.Button(buttons_frame, text="Delete Local DB", 
+                  command=self._delete_local_db, width=25).grid(row=0, column=1, padx=5, pady=5, sticky='ew')
+        ttk.Button(buttons_frame, text="Delete Firestore DB", 
+                  command=self._delete_firestore_db, width=25).grid(row=0, column=2, padx=5, pady=5, sticky='ew')
+        
+        # Configure grid columns to expand evenly
+        buttons_frame.columnconfigure(0, weight=1)
+        buttons_frame.columnconfigure(1, weight=1)
+        buttons_frame.columnconfigure(2, weight=1)
+
+
 
     def _create_report_generator_tab(self, tab):
         # --- UI Elements for Report Generation ---
@@ -281,13 +325,15 @@ The Excel file must contain columns with the following headers (order does not m
 
         import_thread = threading.Thread(
             target=self._run_master_list_import,
-            args=(file_path,),
+            args=(file_path, self.upload_to_firebase_var.get()),
             daemon=True
         )
+
         import_thread.start()
 
-    def _run_master_list_import(self, file_path):
+    def _run_master_list_import(self, file_path, upload_to_firebase):
         """The actual import logic that runs in a thread."""
+
         try:
             self._log_import(f"Reading data from: {os.path.basename(file_path)}")
             importer = ImporterBuilder(file_path).build()
@@ -299,6 +345,12 @@ The Excel file must contain columns with the following headers (order does not m
             self._log_import("Storing data into the local database... (This may take a moment)")
             importer.store_master_list(df)
 
+            if upload_to_firebase:
+                self._log_import("Uploading data to Firebase Firestore... (This may take a while)")
+                importer.upload_master_list_to_firestore()
+                self._log_import("Firebase upload complete.")
+
+
             self._log_import("\nImport complete! The student master list has been updated.")
             messagebox.showinfo("Success", f"Successfully imported {len(df)} records into the master list.")
 
@@ -308,6 +360,99 @@ The Excel file must contain columns with the following headers (order does not m
             messagebox.showerror("Import Failed", error_message)
         finally:
             self.root.after(0, lambda: self.import_btn.config(state='normal'))
+
+    def _upload_local_to_firebase(self):
+        """Upload all local database records to Firebase Firestore."""
+        response = messagebox.askyesno(
+            "Confirm Upload", 
+            "This will upload all records from the local database to Firebase Firestore. Continue?"
+        )
+        if not response:
+            return
+        
+        self._log_import("Starting local DB to Firebase upload...")
+        threading.Thread(target=self._run_upload_local_to_firebase, daemon=True).start()
+    
+    def _run_upload_local_to_firebase(self):
+        """Run the upload in a separate thread."""
+        try:
+            manager = MasterListManager()
+            records = manager.get_local_records()
+            
+            if not records:
+                self._log_import("No records found in local database.")
+                messagebox.showinfo("Info", "No records found in local database.")
+                return
+            
+            self._log_import(f"Found {len(records)} records in local database.")
+            self._log_import("Uploading to Firebase... (This may take a while)")
+            
+            count = manager.upload_local_to_firestore(
+                progress_callback=lambda c: self._log_import(f"Uploaded {c} records...")
+            )
+            
+            self._log_import(f"\nSuccess! Uploaded {count} records to Firebase.")
+            messagebox.showinfo("Success", f"Uploaded {count} records to Firebase.")
+            
+        except Exception as e:
+            error_msg = f"Error uploading to Firebase: {e}"
+            self._log_import(f"ERROR: {error_msg}")
+            messagebox.showerror("Upload Failed", error_msg)
+    
+    def _delete_local_db(self):
+        """Delete all records from the local database."""
+        response = messagebox.askyesnocancel(
+            "Confirm Delete", 
+            "WARNING: This will permanently delete ALL records from the local database. This action cannot be undone!\n\nAre you sure you want to continue?"
+        )
+        if not response:
+            return
+        
+        self._log_import("Deleting all local database records...")
+        threading.Thread(target=self._run_delete_local_db, daemon=True).start()
+    
+    def _run_delete_local_db(self):
+        """Run the deletion in a separate thread."""
+        try:
+            manager = MasterListManager()
+            deleted = manager.delete_local_records()
+            
+            self._log_import(f"Deleted {deleted} records from local database.")
+            messagebox.showinfo("Success", f"Deleted {deleted} records from local database.")
+            
+        except Exception as e:
+            error_msg = f"Error deleting local records: {e}"
+            self._log_import(f"ERROR: {error_msg}")
+            messagebox.showerror("Delete Failed", error_msg)
+    
+    def _delete_firestore_db(self):
+        """Delete all records from the Firestore database."""
+        response = messagebox.askyesnocancel(
+            "Confirm Delete", 
+            "WARNING: This will permanently delete ALL records from the Firebase Firestore database. This action cannot be undone!\n\nAre you sure you want to continue?"
+        )
+        if not response:
+            return
+        
+        self._log_import("Deleting all Firestore database records...")
+        threading.Thread(target=self._run_delete_firestore_db, daemon=True).start()
+    
+    def _run_delete_firestore_db(self):
+        """Run the deletion in a separate thread."""
+        try:
+            manager = MasterListManager()
+            deleted = manager.delete_firestore_records(
+                progress_callback=lambda c: self._log_import(f"Deleted {c} records...")
+            )
+            
+            self._log_import(f"\nDeleted {deleted} records from Firestore database.")
+            messagebox.showinfo("Success", f"Deleted {deleted} records from Firestore database.")
+            
+        except Exception as e:
+            error_msg = f"Error deleting Firestore records: {e}"
+            self._log_import(f"ERROR: {error_msg}")
+            messagebox.showerror("Delete Failed", error_msg)
+
 
     def _start_report_generation(self):
         """Validates inputs and starts the report generation in a thread."""
@@ -559,231 +704,123 @@ The Excel file must contain columns with the following headers (order does not m
         finally:
             self.update_status("Ready")
 
-
-    def _create_qr_generator_tab(self, tab):
-        # Header
-        header = ttk.Label(tab, text="Student QR Code Generator", style="Header.TLabel")
-        header.pack(pady=(0, 20))
-        
-        # Excel File Selection
-        excel_frame = ttk.LabelFrame(tab, text="1. Select Excel File for QR Codes", padding=10)
-        excel_frame.pack(fill=tk.X, pady=5)
-        
-        self.excel_path = tk.StringVar()
-        ttk.Entry(excel_frame, textvariable=self.excel_path, state='readonly').pack(
-            side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-        ttk.Button(excel_frame, text="Browse...", command=self.browse_excel).pack(side=tk.RIGHT)
-        
-        # Output Folder Selection
-        output_frame = ttk.LabelFrame(tab, text="2. Select Output Folder (Optional)", padding=10)
-        output_frame.pack(fill=tk.X, pady=5)
-        
-        self.output_path = tk.StringVar(value=os.path.join(os.getcwd(), 'qr'))
-        ttk.Entry(output_frame, textvariable=self.output_path).pack(
-            side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-        ttk.Button(output_frame, text="Browse...", command=self.browse_output).pack(side=tk.RIGHT)
-        
-        # Encryption Settings
-        encryption_frame = ttk.LabelFrame(tab, text="3. Encryption Settings", padding=10)
-        encryption_frame.pack(fill=tk.X, pady=5)
-        
-        self.encryption_var = tk.BooleanVar(value=self.encryption_enabled)
-        ttk.Checkbutton(
-            encryption_frame, text="Enable Encryption", variable=self.encryption_var,
-            command=self.toggle_encryption).pack(side=tk.LEFT, padx=5)
-        
-        self.key_status_var = tk.StringVar(value="Key: Not Set")
-        ttk.Label(encryption_frame, textvariable=self.key_status_var, foreground="gray").pack(side=tk.LEFT, padx=5)
-        ttk.Button(encryption_frame, text="Set Encryption Key", command=self.set_encryption_key).pack(side=tk.RIGHT, padx=5)
-        
-        # Progress Frame
-        progress_frame = ttk.LabelFrame(tab, text="Progress", padding=10)
-        progress_frame.pack(fill=tk.BOTH, expand=True, pady=10)
-        
-        self.progress_label = ttk.Label(progress_frame, text="Ready to generate QR codes")
-        self.progress_label.pack(anchor=tk.W, pady=(0, 5))
-        
-        self.progress = ttk.Progressbar(progress_frame, orient=tk.HORIZONTAL, length=100, mode='determinate')
-        self.progress.pack(fill=tk.X, pady=5)
-        
-        # Log Frame
-        log_frame = ttk.LabelFrame(progress_frame, text="Log")
-        log_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
-        
-        self.log_text = tk.Text(log_frame, height=8, wrap=tk.WORD, state='disabled')
-        self.log_text.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
-        
-        scrollbar = ttk.Scrollbar(self.log_text, command=self.log_text.yview)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.log_text.config(yscrollcommand=scrollbar.set)
-        
-        # Generate Button
-        self.generate_btn = ttk.Button(tab, text="Generate QR Codes", command=self.start_generation, style="Accent.TButton")
-        self.generate_btn.pack(pady=10)
-        
-        # Status Bar
-        self.status_var = tk.StringVar(value="Ready")
-        status_bar = ttk.Label(tab, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W)
-        status_bar.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 0))
-
-    def _create_master_list_tab(self, tab):
-        # --- UI Elements for Master List Import ---
-        self.master_list_excel_path = tk.StringVar()
-
-        # Header
-        header = ttk.Label(tab, text="Import Student Master List", style="Header.TLabel")
-        header.pack(pady=(0, 20))
-
-        # Instructions
-        instructions = "Import an Excel file to populate the local student database. This database is used for validation."
-        ttk.Label(tab, text=instructions, wraplength=500, justify=tk.LEFT).pack(fill=tk.X, pady=5)
-
-        # Required Columns Info
-        columns_frame = ttk.LabelFrame(tab, text="Required Excel Columns", padding=10)
-        columns_frame.pack(fill=tk.X, pady=(10, 5))
-        
-        column_text = """The Excel file must contain columns with the following headers (order does not matter):
-
-• LRN
-• LAST_NAME
-• FIRST_NAME
-• STUDENT_YEAR
-• SECTION
-• ADVISER
-• GENDER"""
-        ttk.Label(columns_frame, text=column_text, justify=tk.LEFT).pack(anchor=tk.W, padx=5, pady=5)
-
-        # File Selection
-        file_frame = ttk.LabelFrame(tab, text="1. Select Master List Excel File", padding=10)
-        file_frame.pack(fill=tk.X, pady=10)
-        
-        ttk.Entry(file_frame, textvariable=self.master_list_excel_path, state='readonly').pack(
-            side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-        ttk.Button(file_frame, text="Browse...", command=self._browse_master_list_file).pack(side=tk.RIGHT)
-
-        # Import Button
-        self.import_btn = ttk.Button(tab, text="Import Master List", command=self._start_master_list_import, style="Accent.TButton")
-        self.import_btn.pack(pady=20)
-
-        # Log Frame
-        import_log_frame = ttk.LabelFrame(tab, text="Import Log", padding=10)
-        import_log_frame.pack(fill=tk.BOTH, expand=True, pady=10)
-        
-        self.import_log_text = tk.Text(import_log_frame, height=10, wrap=tk.WORD, state='disabled')
-        self.import_log_text.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
-        
-        import_scrollbar = ttk.Scrollbar(self.import_log_text, command=self.import_log_text.yview)
-        import_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.import_log_text.config(yscrollcommand=import_scrollbar.set)
-
-    def _create_report_generator_tab(self, tab):
-        # --- UI Elements for Report Generation ---
-        self.report_start_date = tk.StringVar()
-        self.report_end_date = tk.StringVar()
-        self.report_section = tk.StringVar()
-        self.report_output_path = tk.StringVar()
-
-        # Set default dates
-        today = datetime.now()
-        first_day_of_month = today.replace(day=1)
-        self.report_start_date.set(first_day_of_month.strftime("%Y-%m-%d"))
-        self.report_end_date.set(today.strftime("%Y-%m-%d"))
-
-        # Header
-        header = ttk.Label(tab, text="Generate Attendance Report", style="Header.TLabel")
-        header.pack(pady=(0, 20))
-
-        # 1. Parameters Frame
-        params_frame = ttk.LabelFrame(tab, text="1. Report Parameters", padding=10)
-        params_frame.pack(fill=tk.X, pady=5)
-
-        # Date Range
-        date_frame = ttk.Frame(params_frame)
-        date_frame.pack(fill=tk.X, pady=5)
-        ttk.Label(date_frame, text="Start Date (YYYY-MM-DD):").pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Entry(date_frame, textvariable=self.report_start_date, width=15).pack(side=tk.LEFT, padx=5)
-        ttk.Label(date_frame, text="End Date (YYYY-MM-DD):").pack(side=tk.LEFT, padx=(10, 5))
-        ttk.Entry(date_frame, textvariable=self.report_end_date, width=15).pack(side=tk.LEFT, padx=5)
-
-        # Section Filter
-        section_frame = ttk.Frame(params_frame)
-        section_frame.pack(fill=tk.X, pady=5)
-        ttk.Label(section_frame, text="Section (Optional):").pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Entry(section_frame, textvariable=self.report_section, width=32).pack(side=tk.LEFT, padx=5)
-
-        # 2. Output File
-        output_frame = ttk.LabelFrame(tab, text="2. Output File", padding=10)
-        output_frame.pack(fill=tk.X, pady=10)
-        ttk.Entry(output_frame, textvariable=self.report_output_path, state='readonly').pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-        ttk.Button(output_frame, text="Save As...", command=self._browse_report_output_file).pack(side=tk.RIGHT)
-
-        # 3. Generate Button
-        self.generate_report_btn = ttk.Button(tab, text="Generate Report", command=self._start_report_generation, style="Accent.TButton")
-        self.generate_report_btn.pack(pady=20)
-
-        # 4. Log Frame
-        report_log_frame = ttk.LabelFrame(tab, text="Report Generation Log", padding=10)
-        report_log_frame.pack(fill=tk.BOTH, expand=True, pady=10)
-        self.report_log_text = tk.Text(report_log_frame, height=10, wrap=tk.WORD, state='disabled')
-        self.report_log_text.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
-        report_scrollbar = ttk.Scrollbar(self.report_log_text, command=self.report_log_text.yview)
-        report_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.report_log_text.config(yscrollcommand=report_scrollbar.set)
-
-    def _log_import(self, message):
-        """Add a message to the import log."""
-        self.import_log_text.config(state='normal')
-        self.import_log_text.insert(tk.END, message + "\n")
-        self.import_log_text.see(tk.END)
-        self.import_log_text.config(state='disabled')
-        self.root.update_idletasks()
-
-    def _log_report_gen(self, message):
-        """Add a message to the report generation log."""
-        self.report_log_text.config(state='normal')
-        self.report_log_text.insert(tk.END, message + "\n")
-        self.report_log_text.see(tk.END)
-        self.report_log_text.config(state='disabled')
-        self.root.update_idletasks()
-
-    def _browse_master_list_file(self):
-        """Open file dialog to select the master list Excel file."""
-        file_path = filedialog.askopenfilename(
-            title="Select Master List Excel File",
-            filetypes=[("Excel files", "*.xlsx *.xls")])
-        if file_path:
-            self.master_list_excel_path.set(file_path)
-
-    def _browse_report_output_file(self):
-        """Open file dialog to select the report output file path."""
-        file_path = filedialog.asksaveasfilename(
-            title="Save Report As",
-            filetypes=[("Excel files", "*.xlsx")],
-            defaultextension=".xlsx",
-            initialfile="Attendance Report.xlsx")
-        if file_path:
-            self.report_output_path.set(file_path)
-
-
-    def _start_master_list_import(self):
-        """Start the master list import process in a separate thread."""
-        file_path = self.master_list_excel_path.get()
-        if not file_path:
-            messagebox.showerror("Error", "Please select an Excel file first!")
+    def upload_key(self):
+        """Upload the current encryption key to Firebase"""
+        if not self.encryption_key:
+            messagebox.showerror("Error", "No key set to upload.")
             return
+        
+        try:
+            km = KeyManager(self.key_file)
+            km.upload_key()
+            messagebox.showinfo("Success", "Key uploaded to Firebase successfully.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to upload key: {e}")
 
-        self.import_btn.config(state='disabled')
-        self._log_import("Starting import process...")
+    def download_key(self):
+        """Download the encryption key from Firebase"""
+        try:
+            km = KeyManager(self.key_file)
+            km.retrieve_key()
+            
+            # Reload key
+            if os.path.exists(self.key_file):
+                with open(self.key_file, 'rb') as f:
+                    self.encryption_key = f.read()
+                
+                self.qr_generator = QRCodeGenerator(encryption_key=self.encryption_key)
+                self.encryption_enabled = True
+                self.encryption_var.set(True)
+                self.update_ui_state()
+                messagebox.showinfo("Success", "Key downloaded from Firebase successfully.")
+            else:
+                messagebox.showerror("Error", "Key downloaded but file not found.")
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to download key: {e}")
 
-        import_thread = threading.Thread(
-            target=self._run_master_list_import,
-            args=(file_path,),
-            daemon=True
-        )
-        import_thread.start()
+    def _create_image_management_tab(self, tab):
+        # --- UI Elements for Image Management ---
+        
+        # Header
+        header = ttk.Label(tab, text="Student Image Management", style="Header.TLabel")
+        header.pack(pady=(0, 20))
+        
+        # Instructions
+        instructions = "Manage student images stored in Google Drive. You can upload images from a local folder or sync existing images."
+        ttk.Label(tab, text=instructions, wraplength=500, justify=tk.LEFT).pack(fill=tk.X, pady=5)
+        
+        # 1. Upload Images
+        upload_frame = ttk.LabelFrame(tab, text="1. Upload Images", padding=10)
+        upload_frame.pack(fill=tk.X, pady=10)
+        
+        self.image_folder_path = tk.StringVar()
+        ttk.Entry(upload_frame, textvariable=self.image_folder_path, state='readonly').pack(
+            side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        ttk.Button(upload_frame, text="Browse...", command=self._browse_image_folder).pack(side=tk.RIGHT)
+        
+        self.upload_images_btn = ttk.Button(tab, text="Upload Images to Drive", command=self._start_image_upload, style="Accent.TButton")
+        self.upload_images_btn.pack(pady=10)
+        
+        # 2. Sync/List Images
+        sync_frame = ttk.LabelFrame(tab, text="2. Image Status", padding=10)
+        sync_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        
+        self.image_log_text = tk.Text(sync_frame, height=10, wrap=tk.WORD, state='disabled')
+        self.image_log_text.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
+        
+        image_scrollbar = ttk.Scrollbar(self.image_log_text, command=self.image_log_text.yview)
+        image_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.image_log_text.config(yscrollcommand=image_scrollbar.set)
+        
+    def _browse_image_folder(self):
+        dir_path = filedialog.askdirectory(title="Select Image Folder")
+        if dir_path:
+            self.image_folder_path.set(dir_path)
+            
+    def _log_image(self, message):
+        self.image_log_text.config(state='normal')
+        self.image_log_text.insert(tk.END, message + "\n")
+        self.image_log_text.see(tk.END)
+        self.image_log_text.config(state='disabled')
+        self.root.update_idletasks()
+        
+    def _start_image_upload(self):
+        folder_path = self.image_folder_path.get()
+        if not folder_path:
+            messagebox.showerror("Error", "Please select a folder with images first!")
+            return
+            
+        self.upload_images_btn.config(state='disabled')
+        self._log_image("Starting image upload...")
+        
+        threading.Thread(target=self._run_image_upload, args=(folder_path,), daemon=True).start()
+        
+    def _run_image_upload(self, folder_path):
+        try:
+            manager = ImageManager(images_dir=folder_path)
+            # We need to capture the output of the manager, but for now let's just run it
+            # Ideally ImageManager should accept a callback or return results
+            # For now we will assume it works and just log start/end
+            
+            # Since ImageManager methods might print to stdout, we can't easily capture it without redirecting stdout
+            # or modifying ImageManager. For this task, we'll just run it.
+            
+            # We'll use upload_images
+            self._log_image(f"Uploading images from {folder_path}...")
+            manager.upload_images()
+            
+            self._log_image("Image upload process completed.")
+            messagebox.showinfo("Success", "Image upload process completed.")
 
-    def _run_master_list_import(self, file_path):
-        """The actual import logic that runs in a thread."""
+            
+        except Exception as e:
+            self._log_image(f"Error: {e}")
+            messagebox.showerror("Error", f"Image upload failed: {e}")
+        finally:
+            self.root.after(0, lambda: self.upload_images_btn.config(state='normal'))
+
+
         try:
             self._log_import(f"Reading data from: {os.path.basename(file_path)}")
             importer = ImporterBuilder(file_path).build()

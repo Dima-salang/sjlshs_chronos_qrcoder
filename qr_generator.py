@@ -57,7 +57,7 @@ class QRCodeGenerator:
             df = pd.read_excel(self.excel_path)
             
             # Check for required columns
-            required_columns = ['Student ID']
+            required_columns = ['Student ID', 'Section']
             missing_columns = [col for col in required_columns if col not in df.columns]
             
             if missing_columns:
@@ -65,6 +65,7 @@ class QRCodeGenerator:
                 
             # Convert Student ID to string and clean data
             df['Student ID'] = df['Student ID'].astype(str).str.strip()
+            df['Section'] = df['Section'].astype(str).str.strip()
             
             # Remove any rows with missing required data
             df = df.dropna(subset=required_columns, how='any')
@@ -94,9 +95,10 @@ class QRCodeGenerator:
             
             # Generate QR code with automatic version selection
             qr = qrcode.QRCode(
-                error_correction=qrcode.constants.ERROR_CORRECT_H,
-                box_size=10,
-                border=4,
+                version=None,
+                error_correction=qrcode.constants.ERROR_CORRECT_M,
+                box_size=6,
+                border=2,
             )
             qr.add_data(qr_data)
             qr.make(fit=True)
@@ -128,7 +130,8 @@ class QRCodeGenerator:
         try:
             # Extract student information
             student_id = str(student_data.get('Student ID', '')).strip()
-            
+            section = str(student_data.get('Section', '')).strip()
+
             # Validate required fields
             if not student_id:
                 return False, f"Missing required fields for student ID: {student_id}"
@@ -136,13 +139,14 @@ class QRCodeGenerator:
             
             # Prepare minimal data for QR code - just the student ID
             # Other data can be looked up from the server using this ID
-            qr_data = {
-                "student_id": student_id,
-            }
+            qr_data = student_id
             
             
             # Create output directory path
-            output_path = os.path.join(self.output_path, f"{student_id}.png")
+            # Structure: Output/Section/StudentID/StudentID.png
+            student_dir = os.path.join(self.output_path, section, student_id)
+            os.makedirs(student_dir, exist_ok=True)
+            output_path = os.path.join(student_dir, f"{student_id}.png")
             
             # Check if QR code already exists
             if os.path.exists(output_path):

@@ -5,3 +5,7 @@ openpyxl>=3.1.2
 ttkthemes>=3.2.2
 pycryptodome>=3.18.0
 pyzbar>=0.1.9
+firebase-admin>=6.2.0
+google-api-python-client>=2.0.0
+google-auth-httplib2>=0.1.0
+google-auth-oauthlib>=0.4.0
