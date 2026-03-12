@@ -114,13 +114,13 @@ class QRCodeCrypto:
             ) from e
 
     def save_key(self, file_path: str) -> None:
-        """Save the key to a file.
+        """Save the key to a file in base64 format.
 
         Args:
             file_path: Path to save the key file
         """
         with open(file_path, "wb") as f:
-            f.write(self.key)
+            f.write(b64encode(self.key))
 
     @classmethod
     def load_from_file(cls, file_path: str) -> "QRCodeCrypto":
