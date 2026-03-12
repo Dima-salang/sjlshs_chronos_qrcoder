@@ -6,14 +6,13 @@ from PIL import Image, ImageTk
 import pandas as pd
 from qr_generator import QRCodeGenerator
 
-# --- Modern Sleek Design System ---
-BG_COLOR = "#0F111A"  # Deep Navy Dark
-CARD_COLOR = "#1B1E2B"  # Soft Slate
-ACCENT_COLOR = "#3B82F6"  # Modern Electric Blue (instead of orange)
-SUCCESS_COLOR = "#10B981"  # Emerald Green
-ERROR_COLOR = "#EF4444"  # Rose Red
-TEXT_PRIMARY = "#F8FAFC"  # Off-White
-TEXT_SECONDARY = "#94A3B8"  # Slate Gray
+BG_COLOR = "#0F111A"
+CARD_COLOR = "#1B1E2B"
+ACCENT_COLOR = "#3B82F6"
+SUCCESS_COLOR = "#10B981"
+ERROR_COLOR = "#EF4444"
+TEXT_PRIMARY = "#F8FAFC"
+TEXT_SECONDARY = "#94A3B8" 
 
 
 class SaturnApp:
@@ -59,7 +58,6 @@ class SaturnApp:
         )
 
     def _build_ui(self):
-        # 1. Sidebar - Sleek Information
         sidebar = tk.Frame(self.root, bg=BG_COLOR, width=280)
         sidebar.pack(side="left", fill="y", padx=(20, 0), pady=40)
         sidebar.pack_propagate(False)
@@ -120,7 +118,6 @@ class SaturnApp:
             "SELECT FILE",
         )
 
-        # Card: Output Directory
         self._create_card(
             workspace,
             "Output Location",
@@ -130,11 +127,9 @@ class SaturnApp:
             "CHOOSE FOLDER",
         )
 
-        # Process Section
         process_frame = tk.Frame(workspace, bg=BG_COLOR)
         process_frame.pack(fill="x", side="bottom", pady=(20, 0))
 
-        # Progress
         self.progress = ttk.Progressbar(
             process_frame, style="Sleek.Horizontal.TProgressbar", mode="determinate"
         )
